@@ -7,7 +7,10 @@ const API_URL = "http://localhost:8000";
 function App() {
   const [activeSystem, setActiveSystem] = useState("aegis"); // "aegis" or "cypher"
   const [selectedFile, setSelectedFile] = useState(null);
+  const [inputText, setInputText] = useState("");
+  const [inputMode, setInputMode] = useState("file"); // "file" or "text"
   const [vaultData, setVaultData] = useState(null);
+  const [decryptedText, setDecryptedText] = useState(null);
   const [attackResult, setAttackResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const fileInputRef = useRef(null);
@@ -17,30 +20,45 @@ function App() {
     setVaultData(null);
     setAttackResult(null);
     setSelectedFile(null);
+    setInputText("");
+    setInputMode("file");
+    setDecryptedText(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   const handleFileChange = (e) => {
     if (e.target.files && e.target.files[0]) {
       setSelectedFile(e.target.files[0]);
+      setInputText("");
     }
   };
 
   const handleEncrypt = async () => {
-    if (!selectedFile) return;
+    if (inputMode === "file" && !selectedFile) return;
+    if (inputMode === "text" && !inputText.trim()) return;
     setLoading(true);
     try {
       const endpoint = activeSystem === "aegis" ? "/aegis/upload" : "/cypher/upload";
-      const formData = new FormData();
-      formData.append("file", selectedFile);
-      
-      const res = await fetch(`${API_URL}${endpoint}`, {
-        method: "POST",
-        body: formData
-      });
+      let res;
+      if (inputMode === "file") {
+        const formData = new FormData();
+        formData.append("file", selectedFile);
+        res = await fetch(`${API_URL}${endpoint}`, {
+          method: "POST",
+          body: formData
+        });
+      } else {
+        // Send text as JSON
+        res = await fetch(`${API_URL}${endpoint}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: inputText })
+        });
+      }
       const data = await res.json();
       setVaultData(data);
       setAttackResult(null);
+      setDecryptedText(null);
     } catch (err) {
       console.error("Encryption Error:", err);
       alert("Failed to upload and encrypt. See console.");
@@ -80,14 +98,20 @@ function App() {
       }
       
       const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.URL.revokeObjectURL(url);
+      
+      if (filename === 'input.txt') {
+        const textOutput = await blob.text();
+        setDecryptedText(textOutput);
+      } else {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      }
     } catch (err) {
       console.error("Download Error:", err);
       alert(`Download/Decryption failed: ${err.message}`);
@@ -158,29 +182,68 @@ function App() {
           <p className="control-label" style={{marginBottom: "1rem"}}>Holds Private Keys locally. Uploads encrypted files.</p>
           
           <div className="control-group">
-            <label className="control-label">Select File to Upload:</label>
-            <div className="file-input-wrapper">
-              <input 
-                type="file" 
-                ref={fileInputRef}
-                onChange={handleFileChange}
-                style={{display: 'none'}}
-              />
-              <button className="btn" onClick={() => fileInputRef.current && fileInputRef.current.click()} style={{width: '100%'}}>
-                 <UploadCloud size={18} style={{marginRight: '8px'}} /> {selectedFile ? selectedFile.name : "Choose File..."}
+            <label className="control-label">Input Mode:</label>
+            <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
+              <button
+                className={`btn ${inputMode === 'file' ? 'btn-primary' : ''}`}
+                style={{ flex: 1 }}
+                onClick={() => setInputMode('file')}
+                type="button"
+              >
+                File
+              </button>
+              <button
+                className={`btn ${inputMode === 'text' ? 'btn-primary' : ''}`}
+                style={{ flex: 1 }}
+                onClick={() => setInputMode('text')}
+                type="button"
+              >
+                Text
               </button>
             </div>
+            {inputMode === 'file' ? (
+              <div className="file-input-wrapper">
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileChange}
+                  style={{ display: 'none' }}
+                />
+                <button className="btn" onClick={() => fileInputRef.current && fileInputRef.current.click()} style={{ width: '100%' }}>
+                  <UploadCloud size={18} style={{ marginRight: '8px' }} /> {selectedFile ? selectedFile.name : "Choose File..."}
+                </button>
+              </div>
+            ) : (
+              <textarea
+                className="input-field"
+                value={inputText}
+                onChange={e => setInputText(e.target.value)}
+                placeholder="Enter or paste text to encrypt..."
+                rows={5}
+                style={{ marginBottom: '1rem', resize: 'vertical' }}
+              />
+            )}
           </div>
-          <button className="btn btn-primary" onClick={handleEncrypt} disabled={loading || !selectedFile}>
+          <button
+            className="btn btn-primary"
+            onClick={handleEncrypt}
+            disabled={loading || (inputMode === 'file' ? !selectedFile : !inputText.trim())}
+          >
             <Lock size={18} /> {loading ? 'Processing...' : `Sign, Encrypt & Upload`}
           </button>
           
           {vaultData && (
              <div className="control-group" style={{marginTop: "1.5rem", paddingTop: "1.5rem", borderTop: "1px solid rgba(255,255,255,0.1)"}}>
-                <label className="control-label">File Available in Vault:</label>
+                <label className="control-label">{vaultData.filename === 'input.txt' ? 'Text Available in Vault:' : 'File Available in Vault:'}</label>
                 <button className="btn" onClick={handleDownload} disabled={loading} style={{background: 'rgba(0, 255, 135, 0.1)', color: 'var(--neon-green)', borderColor: 'var(--neon-green)'}}>
-                  <Download size={18} /> Fetch & Decrypt File
+                  <Download size={18} /> {vaultData.filename === 'input.txt' ? 'Fetch & Decrypt Text' : 'Fetch & Decrypt File'}
                 </button>
+                {decryptedText && (
+                  <div className="data-box alert" style={{marginTop: "1rem", borderColor: "var(--neon-green)", background: "rgba(0, 255, 135, 0.05)"}}>
+                    <div className="control-label" style={{color: 'var(--neon-green)', marginBottom: '0.5rem'}}>Decrypted Output:</div>
+                    <pre style={{whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--text-primary)', margin: 0}}>{decryptedText}</pre>
+                  </div>
+                )}
              </div>
           )}
 
@@ -208,24 +271,35 @@ function App() {
 
           <div className="data-box info">
             <div className="control-label">Digital Signature (SQLite DB):</div>
-            <pre style={{color: 'var(--neon-blue)'}}>{vaultData ? vaultData.digital_signature.substring(0, 150) + "..." : "No Signature Yet"}</pre>
+            <pre style={{color: 'var(--neon-blue)'}}>{
+              vaultData && typeof vaultData.digital_signature === 'string'
+                ? vaultData.digital_signature.substring(0, 150) + "..."
+                : "No Signature Yet"
+            }</pre>
           </div>
 
           <div className="data-box info" style={{marginTop: "1rem"}}>
             <div className="control-label">Stored Public Key Format:</div>
-            <pre>{vaultData ? vaultData.public_key.substring(0, 150) + "..." : "No Data"}</pre>
+            <pre>{
+              vaultData && typeof vaultData.public_key === 'string'
+                ? vaultData.public_key.substring(0, 150) + "..."
+                : "No Data"
+            }</pre>
           </div>
 
-          <div className="data-box" style={{marginTop: "1rem"}}>
+           <div className="data-box" style={{marginTop: "1rem"}}>
              <div className="control-label">File Storage / Ciphertext Path:</div>
              <pre>
-               {vaultData 
-                  ? (activeSystem === 'aegis' 
-                      ? `[AEGIS FILE SERVER]\nStored RSA-AES Encrypted Blob for ID: ${vaultData.file_id}` 
-                      : `[LATTICE KEM SERVER]\nKyber Encapsulation Key:\n${vaultData.pqc_key_ciphertext.substring(0,50)}...\n\nSymmetric AES Payload Stored for ID: ${vaultData.file_id}`)
-                  : "Awaiting Data Injection..."}
+              {vaultData
+                ? (activeSystem === 'aegis'
+                   ? `[AEGIS FILE SERVER]\nStored RSA-AES Encrypted Blob for ID: ${vaultData.file_id}`
+                   : (vaultData.pqc_key_ciphertext && typeof vaultData.pqc_key_ciphertext === 'string'
+                      ? `[LATTICE KEM SERVER]\nKyber Encapsulation Key:\n${vaultData.pqc_key_ciphertext.substring(0,50)}...\n\nSymmetric AES Payload Stored for ID: ${vaultData.file_id}`
+                      : `[LATTICE KEM SERVER]\nNo PQC Key Data\n\nSymmetric AES Payload Stored for ID: ${vaultData.file_id}`)
+                  )
+                : "Awaiting Data Injection..."}
              </pre>
-          </div>
+           </div>
         </div>
 
         {/* 3. Quantum Attacker */}
